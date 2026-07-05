@@ -21,6 +21,21 @@ void i2c_init(void)
     ESP_ERROR_CHECK(i2c_driver_install(I2C_PORT, cfg.mode, 0, 0, 0));
 }
 
+esp_err_t scd41_write_command(uint16_t cmd)
+{
+    uint8_t data[2];
+
+    data[0] = cmd >> 8;
+    data[1] = cmd & 0xFF;
+
+    return i2c_master_write_to_device(
+            I2C_PORT,
+            SCD41_ADDR,
+            data,
+            sizeof(data),
+            pdMS_TO_TICKS(1000));
+}
+
 void app_main(void)
 {
 
