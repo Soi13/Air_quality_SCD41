@@ -97,90 +97,48 @@ void app_main(void)
     err = scd41_write_command(0x3f86); //Before start measurement we need send command for Stop periodic measurement
     vTaskDelay(pdMS_TO_TICKS(500)); //Wait exactly 500ms (this is requirement)
     err = scd41_write_command(0x21B1); //Now Start periodic measurement
-    vTaskDelay(pdMS_TO_TICKS(5000)); //Wait exactly 5000ms (this is requirement)
-    err = scd41_write_command(0xec05); //Now begin read measurement
-    vTaskDelay(pdMS_TO_TICKS(1));
 
-    ESP_LOGI(TAG, "Start measurement: %s", esp_err_to_name(err));
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(5000)); //Wait exactly 5000ms (this is requirement)
+        err = scd41_write_command(0xec05); //Now begin read measurement
+        vTaskDelay(pdMS_TO_TICKS(1));
 
-    //Read 9 bytes
-    i2c_master_receive(scd41, buffer, 9, 1000);
+        //ESP_LOGI(TAG, "Start measurement: %s", esp_err_to_name(err));
 
-    //////Get data from sensor
-    //CO2
-    co2 = (buffer[0]<<8) | buffer[1];
+        //Read 9 bytes
+        i2c_master_receive(scd41, buffer, 9, 1000);
 
-    //Temperature
-    raw_temp = (buffer[3]<<8) | buffer[4];
-    float temp = -45.0f + 175.0f * ((float)raw_temp / 65535.0f);
+        //Check CRC for CO
+        if(crc8(&buffer[0], 2) != buffer[2]) {
+            ESP_LOGE(TAG, "CO2 CRC failed");
+        }
 
-    //Humidity
-    raw_humidity = (buffer[6]<<8) | buffer[7];
-    float humidity = 100.0f * ((float)raw_humidity / 65535.0f);
+        //Check CRC for temperature
+        if(crc8(&buffer[3], 2) != buffer[5]) {
+            ESP_LOGE(TAG, "Temperature CRC failed");
+        }
 
-    //Print data
-    printf("CO2 = %u ppm\n", co2);
-    printf("Temp = %.2f C\n", temp);
-    printf("Humidity = %.2f %%\n", humidity);
+        //Check CRC for humidity
+        if(crc8(&buffer[6], 2) != buffer[8]) {
+            ESP_LOGE(TAG, "Humidity CRC failed");
+        }
 
+        //////Get data from sensor
+        //CO2
+        co2 = (buffer[0]<<8) | buffer[1];
 
+        //Temperature
+        raw_temp = (buffer[3]<<8) | buffer[4];
+        float temp = -45.0f + 175.0f * ((float)raw_temp / 65535.0f);
 
+        //Humidity
+        raw_humidity = (buffer[6]<<8) | buffer[7];
+        float humidity = 100.0f * ((float)raw_humidity / 65535.0f);
 
-
-
-
-
-
-
-
-/*
-    uint8_t buffer[9];
-    uint16_t co2, raw_temp, raw_humidity;
-
-    i2c_init();
-
-    //Start periodic measurement
-    ESP_ERROR_CHECK(scd41_write_command(0x21B1));
-    vTaskDelay(pdMS_TO_TICKS(5000));
-
-    //Send the Read Measurement command
-    ESP_ERROR_CHECK(scd41_write_command(0xEC05));
-    vTaskDelay(pdMS_TO_TICKS(1));
-
-    //Read 9 bytes
-    ESP_ERROR_CHECK(i2c_master_read_from_device(I2C_PORT, SCD41_ADDR, buffer, sizeof(buffer), pdMS_TO_TICKS(1000)));
-
-    //Check CRC for CO
-    if(crc8(buffer, 2) != buffer[2]) {
-        printf("CO2 CRC ERROR\n");
+        //Print data
+        printf("CO2 = %u ppm\n", co2);
+        printf("Temp = %.2f C\n", temp);
+        printf("Humidity = %.2f %%\n", humidity);
+        printf("----------------------------\n");
     }
-
-    //Check CRC for temperature
-    if(crc8(buffer, 5) != buffer[5]) {
-        printf("Temperature CRC ERROR\n");
-    }
-
-    //Check CRC for humidity
-    if(crc8(buffer, 8) != buffer[8]) {
-        printf("Humidity CRC ERROR\n");
-    }
-
-    //////Get data from sensor
-    //CO2
-    co2 = (buffer[0]<<8) | buffer[1];
-
-    //Temperature
-    raw_temp = (buffer[3]<<8) | buffer[4];
-    float temp = -45.0f + 175.0f * ((float)raw_temp / 65535.0f);
-
-    //Humidity
-    raw_humidity = (buffer[6]<<8) | buffer[7];
-    float humidity = 100.0f * ((float)raw_humidity / 65535.0f);
-
-    //Print data
-    printf("CO2 = %u ppm\n", co2);
-    printf("Temp = %.2f C\n", temp);
-    printf("Humidity = %.2f %%\n", humidity);
-
-    vTaskDelay(pdMS_TO_TICKS(5000)); */
 }
