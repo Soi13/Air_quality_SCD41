@@ -4,7 +4,7 @@
   "idf.openOcdConfigs": [
     "board/esp32c3-builtin.cfg"
   ],
-  "idf.port": "detect",
+  "idf.port": "/dev/ttyACM0",
   "idf.currentSetup": "/home/oleg/esp/esp-idf",
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32c3"
@@ -14,5 +14,6 @@
     "--background-index",
     "--query-driver=**",
     "--compile-commands-dir=/home/oleg/Documents/Esp32_projects/air_quality_SCD41/build"
-  ]
+  ],
+  "idf.flashType": "UART"
 }
