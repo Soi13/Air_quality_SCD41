@@ -70,6 +70,29 @@ uint8_t crc8(const uint8_t *data, int len) {
     return crc;
 }
 
+esp_err_t scd41_write_command_with_u16_parameter(uint16_t cmd, uint16_t value) {
+    uint8_t tx[5];
+
+    tx[0] = (cmd >> 8) & 0xFF;
+    tx[1] = cmd & 0xFF;
+
+    tx[2] = (value >> 8) & 0xFF;
+    tx[3] = value & 0xFF;
+
+    tx[4] = crc8(&tx[2], 2);
+
+    return i2c_master_transmit(scd41, tx, sizeof(tx), 1000);
+}
+
+esp_err_t scd41_set_sensor_altitude(uint16_t altitude) {
+    if (altitude > 3000) {
+        ESP_LOGE(TAG, "Altitude can't be more than 3000m.");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    return scd41_write_command_with_u16_parameter(0x2427, altitude);
+}
+
 void app_main(void)
 {
     uint8_t buffer[9];
@@ -84,9 +107,7 @@ void app_main(void)
 
     if(err != ESP_OK)
     {
-        ESP_LOGE(TAG,
-                 "Sensor not found: %s",
-                 esp_err_to_name(err));
+        ESP_LOGE(TAG, "Sensor not found: %s", esp_err_to_name(err));
 
         while(1)
             vTaskDelay(pdMS_TO_TICKS(1000));
@@ -94,13 +115,17 @@ void app_main(void)
 
     ESP_LOGI(TAG,"Sensor detected!");
 
-    err = scd41_write_command(0x3f86); //Before start measurement we need send command for Stop periodic measurement
+    ESP_ERROR_CHECK(scd41_write_command(0x3f86)); //Before start measurement we need send command for Stop periodic measurement
     vTaskDelay(pdMS_TO_TICKS(500)); //Wait exactly 500ms (this is requirement)
-    err = scd41_write_command(0x21B1); //Now Start periodic measurement
+    ESP_LOGI(TAG,"Setting altitude...");
+    ESP_ERROR_CHECK(scd41_set_sensor_altitude(76)); //Set altitude of location for sensor. 76 meters is average altitude of San Jose above sea level.
+    vTaskDelay(pdMS_TO_TICKS(500));
+    ESP_LOGI(TAG,"Starting periodic measurements...");
+    ESP_ERROR_CHECK(scd41_write_command(0x21B1)); //Now Start periodic measurement
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(5000)); //Wait exactly 5000ms (this is requirement)
-        err = scd41_write_command(0xec05); //Now begin read measurement
+        ESP_ERROR_CHECK(scd41_write_command(0xec05)); //Now begin read measurement
         vTaskDelay(pdMS_TO_TICKS(1));
 
         //ESP_LOGI(TAG, "Start measurement: %s", esp_err_to_name(err));
