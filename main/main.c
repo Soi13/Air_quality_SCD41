@@ -3,7 +3,8 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "driver/i2c_master.h"
-//#include "driver/i2c.h"
+#include "esp_wifi.h"
+#include "nvs_flash.h"
 
 #define I2C_PORT    I2C_NUM_0
 #define SDA_PIN     GPIO_NUM_6
@@ -11,7 +12,55 @@
 #define I2C_FREQ        100000
 #define SCD41_ADDR 0x62
 
+#define WIFI_SSID ""
+#define WIFI_PASS ""
+
 static const char *TAG = "SCD41";
+char ip[16];
+
+// Wifi event handler for displaying parameters of connection
+static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        esp_wifi_connect();
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_event_sta_disconnected_t *event = (wifi_event_sta_disconnected_t *)event_data;
+        ESP_LOGW(TAG, "Wi-Fi disconnected, retrying to reconnect. The reason is %d ", event->reason);
+        esp_wifi_connect();
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        snprintf(ip, sizeof(ip), IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "Wi-Fi connected");
+        ESP_LOGI(TAG, "IP Address: " IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "Subnet Mask: " IPSTR, IP2STR(&event->ip_info.netmask));
+        ESP_LOGI(TAG, "Gateway: " IPSTR, IP2STR(&event->ip_info.gw));
+    }
+}
+
+// Initializing Wifi connection
+static void wifi_init(void) {
+    esp_netif_init();
+    esp_event_loop_create_default();
+    esp_netif_create_default_wifi_sta();
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    esp_wifi_init(&cfg);
+
+    esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL);
+    esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL);
+
+    wifi_config_t wifi_config = {
+        .sta = {
+            .ssid = WIFI_SSID,
+            .password = WIFI_PASS,
+            .threshold.authmode = WIFI_AUTH_WPA2_PSK,
+        },
+    };
+
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+    ESP_ERROR_CHECK(esp_wifi_start());
+    //ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(40)); //This method specifically for ESP32-C3, otherwise it will not connect to WiFi.
+}
 
 i2c_master_bus_handle_t bus_handle;
 i2c_master_dev_handle_t scd41;
@@ -98,6 +147,10 @@ void app_main(void)
     uint8_t buffer[9];
     uint16_t co2, raw_temp, raw_humidity;
 
+    ESP_ERROR_CHECK(nvs_flash_init());
+    wifi_init();
+    vTaskDelay(pdMS_TO_TICKS(5000));
+
     ESP_ERROR_CHECK(i2c_init());
     vTaskDelay(pdMS_TO_TICKS(1000));
 
@@ -161,6 +214,7 @@ void app_main(void)
         float humidity = 100.0f * ((float)raw_humidity / 65535.0f);
 
         //Print data
+        printf("IP: %s\n", ip);
         printf("CO2 = %u ppm\n", co2);
         printf("Temp = %.2f C\n", temp);
         printf("Humidity = %.2f %%\n", humidity);
