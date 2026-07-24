@@ -5,6 +5,7 @@
 #include "driver/i2c_master.h"
 #include "esp_wifi.h"
 #include "nvs_flash.h"
+#include "mqtt_client.h"
 
 #define I2C_PORT    I2C_NUM_0
 #define SDA_PIN     GPIO_NUM_6
@@ -12,8 +13,17 @@
 #define I2C_FREQ        100000
 #define SCD41_ADDR 0x62
 
-#define WIFI_SSID ""
+#define WIFI_SSID "Soi13"
 #define WIFI_PASS ""
+
+// MQTT Server/Broker credentials
+#define MQTT_BROKER_URI "mqtt://192.168.1.64"
+#define MQTT_USER "mqtt_user"
+#define MQTT_PASSWORD ""
+#define SCD41_IP "homeassistant/sensor/SCD41_IP"
+#define SCD41_CO2 "homeassistant/sensor/SCD41_CO2"
+#define SCD41_TEMPERATURE "homeassistant/sensor/SCD41_TEMPERATURE"
+#define SCD41_HUMIDITY "homeassistant/sensor/SCD41_HUMIDITY"
 
 static const char *TAG = "SCD41";
 char ip[16];
@@ -60,6 +70,21 @@ static void wifi_init(void) {
     esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     ESP_ERROR_CHECK(esp_wifi_start());
     //ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(40)); //This method specifically for ESP32-C3, otherwise it will not connect to WiFi.
+}
+
+//Initializing MQTT
+static esp_mqtt_client_handle_t client = NULL;
+
+static void mqtt_app(void)
+{
+    esp_mqtt_client_config_t mqtt_cfg = {
+        .broker.address.uri = MQTT_BROKER_URI,
+        .credentials.username = MQTT_USER,
+        .credentials.authentication.password = MQTT_PASSWORD,
+    };
+
+    client = esp_mqtt_client_init(&mqtt_cfg);
+    esp_mqtt_client_start(client);
 }
 
 i2c_master_bus_handle_t bus_handle;
@@ -146,10 +171,13 @@ void app_main(void)
 {
     uint8_t buffer[9];
     uint16_t co2, raw_temp, raw_humidity;
+    char val[16];
 
     ESP_ERROR_CHECK(nvs_flash_init());
     wifi_init();
     vTaskDelay(pdMS_TO_TICKS(5000));
+    mqtt_app();
+    vTaskDelay(pdMS_TO_TICKS(1000));
 
     ESP_ERROR_CHECK(i2c_init());
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -215,9 +243,21 @@ void app_main(void)
 
         //Print data
         printf("IP: %s\n", ip);
+        snprintf(val, sizeof(val), "%s", ip); //Convert data to character buffer
+        esp_mqtt_client_publish(client, SCD41_IP, val, 0, 1, 0);
+
         printf("CO2 = %u ppm\n", co2);
+        snprintf(val, sizeof(val), "%u", co2); //Convert data to character buffer
+        esp_mqtt_client_publish(client, SCD41_CO2, val, 0, 1, 0);
+
         printf("Temp = %.2f C\n", temp);
+        snprintf(val, sizeof(val), "%.2f", temp); //Convert data to character buffer
+        esp_mqtt_client_publish(client, SCD41_TEMPERATURE, val, 0, 1, 0);
+
         printf("Humidity = %.2f %%\n", humidity);
+        snprintf(val, sizeof(val), "%.2f", humidity); //Convert data to character buffer
+        esp_mqtt_client_publish(client, SCD41_HUMIDITY, val, 0, 1, 0);
+
         printf("----------------------------\n");
     }
 }
