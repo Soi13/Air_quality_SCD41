@@ -12,6 +12,11 @@
 #define SCL_PIN     GPIO_NUM_7
 #define I2C_FREQ        100000
 #define SCD41_ADDR 0x62
+#define SSD1309_ADDR 0x3C
+
+#define OLED_WIDTH 128
+#define OLED_HEIGHT 64
+#define OLED_PAGES 8
 
 #define WIFI_SSID "Soi13"
 #define WIFI_PASS ""
@@ -27,6 +32,7 @@
 
 static const char *TAG = "SCD41";
 char ip[16];
+char room[2][15] = {"LIZA'S ROOM:", "DARIA'S ROOM"};
 
 // Wifi event handler for displaying parameters of connection
 static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
@@ -89,6 +95,11 @@ static void mqtt_app(void)
 
 i2c_master_bus_handle_t bus_handle;
 i2c_master_dev_handle_t scd41;
+i2c_master_dev_handle_t oled;
+
+
+// OLED frame buffer (1028 * 64 / 8 = 1024 bytes)
+static uint8_t oled_buffer[OLED_WIDTH * OLED_PAGES];
 
 esp_err_t i2c_init(void) {
     i2c_master_bus_config_t bus_cfg = {
@@ -102,6 +113,7 @@ esp_err_t i2c_init(void) {
 
     ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &bus_handle));
 
+    //Config for SCD41
     i2c_device_config_t dev_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = SCD41_ADDR,
@@ -110,11 +122,26 @@ esp_err_t i2c_init(void) {
 
     ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_cfg, &scd41));
 
+    //Config for OLED display
+    i2c_device_config_t oled_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = SSD1309_ADDR,
+        .scl_speed_hz = I2C_FREQ,
+    };
+
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &oled_cfg, &oled));
+
     return ESP_OK;
 }
 
+//SCD41
 esp_err_t probe_sensor(void) {
     return i2c_master_probe(bus_handle, SCD41_ADDR, 100);
+}
+
+//OLED
+esp_err_t probe_oled(void) {
+    return i2c_master_probe(bus_handle, SSD1309_ADDR, 100);
 }
 
 esp_err_t scd41_write_command(uint16_t cmd) {
@@ -167,6 +194,331 @@ esp_err_t scd41_set_sensor_altitude(uint16_t altitude) {
     return scd41_write_command_with_u16_parameter(0x2427, altitude);
 }
 
+static esp_err_t oled_command(uint8_t command) {
+    uint8_t data[2];
+
+    // 0x00 = following byte is command
+    data[0] = 0x00;
+    data[1] = command;
+
+    return i2c_master_transmit(oled, data, sizeof(data), 1000);
+}
+
+
+static esp_err_t oled_data(const uint8_t *data, size_t length) {
+    // One control byte + maximum 128 data bytes
+    uint8_t tx[129];
+
+    while (length > 0) {
+        size_t chunk = length;
+
+        if (chunk > 128) {
+            chunk = 128;
+        }
+
+        // 0x40 means following bytes are display data
+        tx[0] = 0x40;
+
+        memcpy(&tx[1], data, chunk);
+
+        esp_err_t err = i2c_master_transmit(oled, tx, chunk + 1, 1000);
+
+        if (err != ESP_OK) {
+            return err;
+        }
+
+        data += chunk;
+        length -= chunk;
+    }
+
+    return ESP_OK;
+}
+
+// Initialize OLED
+static void oled_init(void) {
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // Display OFF
+    ESP_ERROR_CHECK(oled_command(0xAE));
+
+    // Clock divide ratio / oscillator frequency
+    ESP_ERROR_CHECK(oled_command(0xD5));
+    ESP_ERROR_CHECK(oled_command(0x80));
+
+    // Multiplex ratio
+    ESP_ERROR_CHECK(oled_command(0xA8));
+    ESP_ERROR_CHECK(oled_command(0x3F));
+
+    // Display offset
+    ESP_ERROR_CHECK(oled_command(0xD3));
+    ESP_ERROR_CHECK(oled_command(0x00));
+
+    // Start line
+    ESP_ERROR_CHECK( oled_command(0x40));
+
+    // Memory addressing mode
+    ESP_ERROR_CHECK(oled_command(0x20));
+
+    // Horizontal addressing
+    ESP_ERROR_CHECK(oled_command(0x00));
+
+    // Segment remap
+    ESP_ERROR_CHECK(oled_command(0xA1));
+
+    // COM scan direction
+    ESP_ERROR_CHECK(oled_command(0xC8));
+
+    // COM pin configuration
+    ESP_ERROR_CHECK(oled_command(0xDA));
+    ESP_ERROR_CHECK(oled_command(0x12));
+
+    // Contrast
+    ESP_ERROR_CHECK(oled_command(0x81));
+    ESP_ERROR_CHECK(oled_command(0xCF));
+
+    // Precharge
+    ESP_ERROR_CHECK(oled_command(0xD9));
+    ESP_ERROR_CHECK(oled_command(0xF1));
+
+    // VCOMH
+    ESP_ERROR_CHECK(oled_command(0xDB));
+    ESP_ERROR_CHECK(oled_command(0x40));
+
+    // Entire display follows RAM
+    ESP_ERROR_CHECK(oled_command(0xA4));
+
+    // Normal display
+    ESP_ERROR_CHECK(oled_command(0xA6));
+
+    // Display ON
+    ESP_ERROR_CHECK(oled_command(0xAF));
+}
+
+//Clear buffer
+static void oled_clear(void) {
+    memset(oled_buffer, 0, sizeof(oled_buffer));
+}
+
+//Update
+static void oled_update(void) {
+    // Column address
+    ESP_ERROR_CHECK(oled_command(0x21));
+    ESP_ERROR_CHECK(oled_command(0));
+    ESP_ERROR_CHECK(oled_command(127));
+
+    // Page address
+    ESP_ERROR_CHECK(oled_command(0x22));
+    ESP_ERROR_CHECK(oled_command(0));
+    ESP_ERROR_CHECK(oled_command(7));
+
+    ESP_ERROR_CHECK(oled_data(oled_buffer, sizeof(oled_buffer))
+    );
+}
+
+static void oled_pixel(int x, int y, bool state) {
+    if (x < 0 || x >= OLED_WIDTH || y < 0 || y >= OLED_HEIGHT) {
+        return;
+    }
+
+    int page = y / 8;
+    int bit =  y % 8;
+    int index = page * OLED_WIDTH + x;
+
+    if (state) {
+        oled_buffer[index] |= (1 << bit);
+    } else {
+        oled_buffer[index] &= ~(1 << bit);
+    }
+}
+
+// 5X7 digits
+static const uint8_t font_digits[10][5] = {
+    {0x3E,0x51,0x49,0x45,0x3E}, // 0
+    {0x00,0x42,0x7F,0x40,0x00}, // 1
+    {0x42,0x61,0x51,0x49,0x46}, // 2
+    {0x21,0x41,0x45,0x4B,0x31}, // 3
+    {0x18,0x14,0x12,0x7F,0x10}, // 4
+    {0x27,0x45,0x45,0x45,0x39}, // 5
+    {0x3C,0x4A,0x49,0x49,0x30}, // 6
+    {0x01,0x71,0x09,0x05,0x03}, // 7
+    {0x36,0x49,0x49,0x49,0x36}, // 8
+    {0x06,0x49,0x49,0x29,0x1E}  // 9
+};
+
+//Font
+static uint8_t get_font_column(char c, int column) {
+    if (c >= '0' && c <= '9') {
+        return font_digits[c - '0'][column];
+    }
+
+    // A
+    if (c == 'A') {
+        static const uint8_t f[5] = {0x7E, 0x11, 0x11, 0x11, 0x7E};
+        return f[column];
+    }
+
+    // C
+    if (c == 'C') {
+        static const uint8_t f[5] = {0x3E, 0x41, 0x41, 0x41, 0x22};
+        return f[column];
+    }
+
+    // D
+    if (c == 'D') {
+        static const uint8_t f[5] = {0x7F, 0x41, 0x41, 0x22, 0x1C};
+        return f[column];
+    }
+
+    // E
+    if (c == 'E') {
+        static const uint8_t f[5] = {0x7F, 0x49, 0x49, 0x49, 0x41};
+        return f[column];
+    }
+
+    // H
+    if (c == 'H') {
+        static const uint8_t f[5] = {0x7F, 0x08, 0x08, 0x08, 0x7F};
+        return f[column];
+    }
+
+    // I
+    if (c == 'I') {
+        static const uint8_t f[5] = { 0x00, 0x41, 0x7F, 0x41, 0x00};
+        return f[column];
+    }
+
+    // L
+    if (c == 'L') {
+        static const uint8_t f[5] = {0x7F, 0x40, 0x40, 0x40, 0x40};
+        return f[column];
+    }
+
+    // M
+    if (c == 'M') {
+        static const uint8_t f[5] = {0x7F, 0x02, 0x0C, 0x02, 0x7F};
+        return f[column];
+    }
+
+    // O
+    if (c == 'O') {
+        static const uint8_t f[5] = {0x3E, 0x41, 0x41, 0x41, 0x3E};
+        return f[column];
+    }
+
+    // P
+    if (c == 'P') {
+        static const uint8_t f[5] = {0x7F, 0x09, 0x09, 0x09, 0x06};
+        return f[column];
+    }
+
+    // R
+    if (c == 'R') {
+        static const uint8_t f[5] = {0x7F, 0x09, 0x19, 0x29, 0x46};
+        return f[column];
+    }
+
+    // S
+    if (c == 'S') {
+        static const uint8_t f[5] = {0x46, 0x49, 0x49, 0x49, 0x31};
+        return f[column];
+    }
+
+    // T
+    if (c == 'T') {
+        static const uint8_t f[5] = {0x01, 0x01, 0x7F, 0x01, 0x01};
+        return f[column];
+    }
+
+    // Z
+    if (c == 'Z') {
+        static const uint8_t f[5] = {0x61, 0x51, 0x49, 0x45, 0x43};
+        return f[column];
+    }
+
+    // '
+    if (c == '\'') {
+        static const uint8_t f[5] = {0x00, 0x03, 0x07, 0x00, 0x00};
+        return f[column];
+    }
+
+    // colon
+    if (c == ':') {
+        static const uint8_t f[5] = {0x00, 0x36, 0x36, 0x00, 0x00};
+        return f[column];
+    }
+
+    // decimal point
+    if (c == '.') {
+        static const uint8_t f[5] = {0x00, 0x60, 0x60, 0x00, 0x00};
+        return f[column];
+    }
+
+    // minus
+    if (c == '-') {
+        static const uint8_t f[5] = {0x08, 0x08, 0x08, 0x08, 0x08};
+        return f[column];
+    }
+
+    // percent
+    if (c == '%') {
+        static const uint8_t f[5] = {0x62, 0x64, 0x08, 0x13, 0x23};
+        return f[column];
+    }
+
+    // Space / unsupported
+    return 0x00;
+}
+
+//Draw character
+static void oled_char(int x, int y, char c) {
+    for (int column = 0; column < 5; column++) {
+        uint8_t line = get_font_column(c, column);
+
+        for (int row = 0; row < 7; row++) {
+            if (line & (1 << row)) {
+                oled_pixel(x + column, y + row, true);
+            }
+        }
+    }
+}
+
+//Draw text
+static void oled_text(int x, int y, const char *text) {
+    while (*text) {
+        oled_char(x, y, *text);
+        x += 6;
+        text++;
+    }
+}
+
+//Display sensor information
+static void display_sensor_data(uint16_t co2, float temp, float humidity) {
+    char value[32];
+
+    oled_clear();
+
+    //Room name
+    oled_text(2, 4, room[0]);
+
+    //CO2
+    oled_text(2, 25, "CO2:");
+    snprintf(value, sizeof(value), "%u", co2);
+    oled_text(38, 25, value);
+    oled_text(68, 25, "PPM");
+
+    //Temperature
+    oled_text(2, 40, "TEMP:");
+    snprintf(value, sizeof(value), "%.1f C", temp);
+    oled_text(38, 40, value);
+
+    //Humidity
+    oled_text(2, 55, "RH:");
+    snprintf(value, sizeof(value), "%.1f %%", humidity);
+    oled_text(38, 55, value);
+
+    oled_update();
+}
+
 void app_main(void)
 {
     uint8_t buffer[9];
@@ -195,6 +547,26 @@ void app_main(void)
     }
 
     ESP_LOGI(TAG,"Sensor detected!");
+    ESP_LOGI(TAG, "Checking OLED at address 0x%02X...", SSD1309_ADDR);
+
+    err = probe_oled();
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OLED not found at 0x%02X: %s", SSD1309_ADDR, esp_err_to_name(err));
+        ESP_LOGE(TAG, "If your OLED is connected correctly, try OLED_ADDR 0x3D.");
+
+        while (1) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
+
+    ESP_LOGI(TAG, "OLED detected!");
+
+    oled_init();
+    oled_clear();
+    oled_text(20, 20, "SCD41");
+    oled_text(20, 36, "START");
+    oled_update();
 
     ESP_ERROR_CHECK(scd41_write_command(0x3f86)); //Before start measurement we need send command for Stop periodic measurement
     vTaskDelay(pdMS_TO_TICKS(500)); //Wait exactly 500ms (this is requirement)
@@ -212,7 +584,7 @@ void app_main(void)
         //ESP_LOGI(TAG, "Start measurement: %s", esp_err_to_name(err));
 
         //Read 9 bytes
-        i2c_master_receive(scd41, buffer, 9, 1000);
+        i2c_master_receive(scd41, buffer, sizeof(buffer), 1000);
 
         //Check CRC for CO
         if(crc8(&buffer[0], 2) != buffer[2]) {
@@ -240,6 +612,9 @@ void app_main(void)
         //Humidity
         raw_humidity = (buffer[6]<<8) | buffer[7];
         float humidity = 100.0f * ((float)raw_humidity / 65535.0f);
+
+        // Display data on OLED
+        display_sensor_data(co2, temp, humidity);
 
         //Print data
         printf("IP: %s\n", ip);
