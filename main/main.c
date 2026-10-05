@@ -679,22 +679,22 @@ void app_main(void)
         display_sensor_data(co2, temp, humidity);
 
         //Print data
-        printf("IP: %s\n", ip);
+        //printf("IP: %s\n", ip);
         snprintf(val, sizeof(val), "%s", ip); //Convert data to character buffer
         esp_mqtt_client_publish(client, SCD41_IP, val, 0, 1, 0);
 
-        printf("CO2 = %u ppm\n", co2);
+        //printf("CO2 = %u ppm\n", co2);
         snprintf(val, sizeof(val), "%u", co2); //Convert data to character buffer
         esp_mqtt_client_publish(client, SCD41_CO2, val, 0, 1, 0);
 
-        printf("Temp = %.2f C\n", temp);
+        //printf("Temp = %.2f C\n", temp);
         snprintf(val, sizeof(val), "%.2f", temp); //Convert data to character buffer
         esp_mqtt_client_publish(client, SCD41_TEMPERATURE, val, 0, 1, 0);
 
-        printf("Humidity = %.2f %%\n", humidity);
+        //printf("Humidity = %.2f %%\n", humidity);
         snprintf(val, sizeof(val), "%.2f", humidity); //Convert data to character buffer
         esp_mqtt_client_publish(client, SCD41_HUMIDITY, val, 0, 1, 0);
 
-        printf("----------------------------\n");
+        //printf("----------------------------\n");
     }
 }
