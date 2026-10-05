@@ -34,6 +34,25 @@ static const char *TAG = "SCD41";
 char ip[16];
 char room[2][15] = {"LIZA'S ROOM:", "DARIA'S ROOM"};
 
+const char* air_q(uint16_t co2) {
+    const char* air_quality[] = {"(EXELLENT)", "(GOOD)", "(MODERATE)", "(UNHEALTHY)", "(DANGEROUS)"};
+
+    if (co2 >= 400 && co2 <= 600) {
+        return air_quality[0];
+    } else if (co2 >= 601 && co2 <= 800) {
+        return air_quality[1];
+    } else if (co2 >= 801 && co2 <= 1100) {
+        return air_quality[2];
+    } else if (co2 >= 1101 && co2 <= 2500) {
+        return air_quality[3];
+    } else if (co2 >= 2501 && co2 <= 5000) {
+        return air_quality[4];
+    }
+
+   return 0;
+}
+
+
 // Wifi event handler for displaying parameters of connection
 static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
@@ -375,6 +394,12 @@ static uint8_t get_font_column(char c, int column) {
         return f[column];
     }
 
+    // G
+    if (c == 'G') {
+        static const uint8_t f[5] = {0x3E, 0x41, 0x49, 0x49, 0x7A};
+        return f[column];
+    }
+
     // H
     if (c == 'H') {
         static const uint8_t f[5] = {0x7F, 0x08, 0x08, 0x08, 0x7F};
@@ -396,6 +421,12 @@ static uint8_t get_font_column(char c, int column) {
     // M
     if (c == 'M') {
         static const uint8_t f[5] = {0x7F, 0x02, 0x0C, 0x02, 0x7F};
+        return f[column];
+    }
+
+    // N
+    if (c == 'N') {
+        static const uint8_t f[5] = {0x7F, 0x02, 0x0C, 0x10, 0x7F};
         return f[column];
     }
 
@@ -426,6 +457,24 @@ static uint8_t get_font_column(char c, int column) {
     // T
     if (c == 'T') {
         static const uint8_t f[5] = {0x01, 0x01, 0x7F, 0x01, 0x01};
+        return f[column];
+    }
+
+    // U
+    if (c == 'U') {
+        static const uint8_t f[5] = {0x3F, 0x40, 0x40, 0x40, 0x3F};
+        return f[column];
+    }
+
+    // Y
+    if (c == 'Y') {
+        static const uint8_t f[5] = {0x03, 0x04, 0x78, 0x04, 0x03};
+        return f[column];
+    }
+
+    // X
+    if (c == 'X') {
+        static const uint8_t f[5] = {0x63, 0x14, 0x08, 0x14, 0x63};
         return f[column];
     }
 
@@ -462,6 +511,18 @@ static uint8_t get_font_column(char c, int column) {
     // percent
     if (c == '%') {
         static const uint8_t f[5] = {0x62, 0x64, 0x08, 0x13, 0x23};
+        return f[column];
+    }
+
+    // (
+    if (c == '(') {
+        static const uint8_t f[5] = {0x00, 0x1C, 0x22, 0x41, 0x00};
+        return f[column];
+    }
+
+    // )
+    if (c == ')') {
+        static const uint8_t f[5] = {0x00, 0x41, 0x22, 0x1C, 0x00};
         return f[column];
     }
 
@@ -504,7 +565,8 @@ static void display_sensor_data(uint16_t co2, float temp, float humidity) {
     oled_text(2, 25, "CO2:");
     snprintf(value, sizeof(value), "%u", co2);
     oled_text(38, 25, value);
-    oled_text(68, 25, "PPM");
+    //oled_text(68, 25, "PPM");
+    oled_text(64, 25, air_q(co2));
 
     //Temperature
     oled_text(2, 40, "TEMP:");
